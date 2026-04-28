@@ -1,0 +1,6 @@
+{
+  "name": "geneus-algo-engine",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/engine.js"
+}
