@@ -23,10 +23,10 @@ function analyzeStock(q){
   const vwap=(price*volume)/avgVolume
 
   // professional breakout scoring
-  const score=
-      momentum*30+
-      moveFromOpen*40+
-      vol_ratio*30
+ const score =
+      momentum*25+
+      moveFromOpen*35+
+      vol_ratio*40
 
   return{
     symbol:q.symbol,
@@ -60,18 +60,17 @@ function classifyStocks(stocks){
 
     if(!s) continue
 
-    // avoid opening traps
-    if(s.moveFromOpen<0.3) continue
+      // avoid falling stocks
+    if (s.moveFromOpen < 0.15) continue
 
-    // avoid weak volume
-    if(s.vol_ratio<0.4) continue
-    if (s.momentum < 0.5) continue
+    // avoid dead volume
+    if (s.vol_ratio < 0.25) continue
 
-    // VWAP filter
-    //if(s.price<s.vwap) continue
+    // basic momentum
+    if (s.momentum < 0.25) continue
 
-    // avoid stocks that already fell from peak
-    if (distanceFromHigh > 1.2) continue
+    // avoid stocks far from high
+    if (s.distanceFromHigh > 2) continue
 
     // breakout candidates
     if(
