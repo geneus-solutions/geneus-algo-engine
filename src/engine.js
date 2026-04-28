@@ -15,6 +15,9 @@ function analyzeStock(q){
   const gap=((open-prev)/prev)*100
   const vol_ratio=volume/avgVolume
   const moveFromOpen=((price-open)/open)*100
+  
+  const dayHigh = q.regularMarketDayHigh || price
+  const distanceFromHigh = ((dayHigh - price) / dayHigh) * 100
 
   // approximate VWAP
   const vwap=(price*volume)/avgVolume
@@ -33,7 +36,8 @@ function analyzeStock(q){
     vol_ratio,
     moveFromOpen,
     vwap,
-    score
+    score,
+    distanceFromHigh
   }
 
 }
@@ -51,18 +55,23 @@ function classifyStocks(stocks){
 
   let bestScore=-Infinity
 
+
   for(const s of stocks){
 
     if(!s) continue
 
     // avoid opening traps
-    if(s.moveFromOpen<0) continue
+    if(s.moveFromOpen<0.3) continue
 
     // avoid weak volume
-    if(s.vol_ratio<1) continue
+    if(s.vol_ratio<0.4) continue
+    if (s.momentum < 0.5) continue
 
     // VWAP filter
-    if(s.price<s.vwap) continue
+    //if(s.price<s.vwap) continue
+
+    // avoid stocks that already fell from peak
+    if (distanceFromHigh > 1.2) continue
 
     // breakout candidates
     if(
@@ -94,20 +103,22 @@ function classifyStocks(stocks){
       result.volumeSpikes.push(s)
     }
 
-    // breakout detection
+  // breakout detection
     if(
-      s.moveFromOpen>0.8 &&
-      s.vol_ratio>1.3 &&
-      s.momentum>1
+      s.moveFromOpen > 0.6 &&
+      s.vol_ratio > 1.3 &&
+      s.momentum > 0.8 &&
+      s.distanceFromHigh < 0.8
     ){
       result.breakout.push(s)
     }
 
     // stock of the day
     if(
-      s.score>bestScore &&
-      s.moveFromOpen>1 &&
-      s.vol_ratio>1.5
+      s.score > bestScore &&
+      s.moveFromOpen > 0.8 &&
+      s.vol_ratio > 1.5 &&
+      s.distanceFromHigh < 0.5
     ){
       bestScore=s.score
       result.stockOfTheDay=s
