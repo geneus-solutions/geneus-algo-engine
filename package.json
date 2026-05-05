@@ -2,5 +2,8 @@
   "name": "geneus-algo-engine",
   "version": "1.0.0",
   "type": "module",
-  "main": "src/engine.js"
+  "main": "src/engine.js",
+  "dependencies": {
+    "javascript-obfuscator": "^5.4.2"
+  }
 }

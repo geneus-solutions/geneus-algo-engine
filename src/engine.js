@@ -50,7 +50,8 @@ function classifyStocks(stocks){
     gap:[],
     volumeSpikes:[],
     breakout:[],
-    stockOfTheDay:null
+    stockOfTheDay:null,
+    fallingStocks:[]
   }
 
   let bestScore=-Infinity
@@ -61,7 +62,10 @@ function classifyStocks(stocks){
     if(!s) continue
 
       // avoid falling stocks
-    if (s.moveFromOpen < 0.15) continue
+    if (s.moveFromOpen < 0.15) {
+      result.fallingStocks.push(s)
+      continue
+    }
 
     // avoid dead volume
     if (s.vol_ratio < 0.25) continue

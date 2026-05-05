@@ -1,0 +1,5 @@
+/node_modules
+/access.log
+.env
+geneus-solutions-backend.env
+ - Copy.env
