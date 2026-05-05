@@ -1,5 +1,3 @@
-// algo-engine/engine.js
-
 function analyzeStock(q){
 
   const price=q.regularMarketPrice||0
@@ -17,16 +15,25 @@ function analyzeStock(q){
   const moveFromOpen=((price-open)/open)*100
   
   const dayHigh = q.regularMarketDayHigh || price
+  const dayLow = q.regularMarketDayLow || price
+
   const distanceFromHigh = ((dayHigh - price) / dayHigh) * 100
 
-  // approximate VWAP
-  const vwap=(price*volume)/avgVolume
+  // ✅ FIXED VWAP (approximation)
+  const vwap = (dayHigh + dayLow + price) / 3
+  const belowVWAP = price < vwap
 
-  // professional breakout scoring
- const score =
+  // existing bullish score (unchanged)
+  const score =
       momentum*25+
       moveFromOpen*35+
       vol_ratio*40
+
+  // ✅ NEW short score
+  const shortScore =
+      (-momentum)*30 +
+      (-moveFromOpen)*40 +
+      vol_ratio*30
 
   return{
     symbol:q.symbol,
@@ -36,7 +43,9 @@ function analyzeStock(q){
     vol_ratio,
     moveFromOpen,
     vwap,
+    belowVWAP,
     score,
+    shortScore,
     distanceFromHigh
   }
 
@@ -51,7 +60,9 @@ function classifyStocks(stocks){
     volumeSpikes:[],
     breakout:[],
     stockOfTheDay:null,
-    fallingStocks:[]
+
+    // ✅ NEW
+    shortCandidates:[]
   }
 
   let bestScore=-Infinity
@@ -60,12 +71,6 @@ function classifyStocks(stocks){
   for(const s of stocks){
 
     if(!s) continue
-
-      // avoid falling stocks
-    if (s.moveFromOpen < 0.15) {
-      result.fallingStocks.push(s)
-      continue
-    }
 
     // avoid dead volume
     if (s.vol_ratio < 0.25) continue
@@ -85,7 +90,7 @@ function classifyStocks(stocks){
       result.top.push(s)
     }
 
-    // weak stocks
+    // weak stocks (your existing logic kept)
     if(
       s.momentum<-0.7 &&
       s.vol_ratio>1
@@ -106,7 +111,7 @@ function classifyStocks(stocks){
       result.volumeSpikes.push(s)
     }
 
-  // breakout detection
+    // breakout detection
     if(
       s.moveFromOpen > 0.6 &&
       s.vol_ratio > 1.3 &&
@@ -127,11 +132,56 @@ function classifyStocks(stocks){
       result.stockOfTheDay=s
     }
 
+    // ======================================================
+    // 🔴 SHORT SELLING LOGIC (NEW - DOES NOT AFFECT ABOVE)
+    // ======================================================
+
+    // 1. Strong intraday weakness
+    if(
+      s.momentum < -0.5 &&
+      s.moveFromOpen < -0.3 &&
+      s.vol_ratio > 1.2
+    ){
+      result.shortCandidates.push({
+        ...s,
+        tag:"INTRADAY_WEAK"
+      })
+    }
+
+    // 2. VWAP breakdown (very reliable)
+    if(
+      s.belowVWAP &&
+      s.momentum < -0.4 &&
+      s.vol_ratio > 1.3
+    ){
+      result.shortCandidates.push({
+        ...s,
+        tag:"VWAP_BREAKDOWN"
+      })
+    }
+
+    // 3. Failed breakout (BEST setup 🔥)
+    if(
+      s.gap > 1 &&                 // gap up
+      s.moveFromOpen < -0.3 &&    // turned red
+      s.distanceFromHigh < 1.5 && // near high rejection
+      s.vol_ratio > 1.3
+    ){
+      result.shortCandidates.push({
+        ...s,
+        tag:"FAILED_BREAKOUT"
+      })
+    }
+
   }
 
+  // existing sorts
   result.top.sort((a,b)=>b.score-a.score)
   result.breakout.sort((a,b)=>b.score-a.score)
   result.volumeSpikes.sort((a,b)=>b.score-a.score)
+
+  // ✅ sort shorts
+  result.shortCandidates.sort((a,b)=>b.shortScore-a.shortScore)
 
   return result
 
