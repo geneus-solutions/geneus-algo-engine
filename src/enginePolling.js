@@ -67,7 +67,7 @@ async function get5MinCandles(symbol) {
 
   } catch (e) {
 
-    console.log("Candle fetch failed:", symbol);
+    console.log("Candle fetch failed: ", e);
 
     return [];
   }
