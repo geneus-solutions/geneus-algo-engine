@@ -1,147 +1,697 @@
+// =============================================
+// ADVANCED INTRADAY SCANNER ENGINE
+// Optimized for NSE Momentum + Pullback + Shorts
+// =============================================
+
 import axios from "axios";
 
-// ===============================
-// FETCH 5 MIN CANDLES (YAHOO)
-// ===============================
-async function get5MinCandles(symbol){
+// =============================================
+// CONFIG
+// =============================================
 
-  try{
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=1d`
+const CONFIG = {
 
-    const res = await axios.get(url)
+  MIN_PRICE: 30,
+  MAX_PRICE: 5000,
 
-    const result = res.data.chart.result[0]
+  REQUEST_DELAY: 120,
 
-    const timestamps = result.timestamp
-    const quotes = result.indicators.quote[0]
+  MAX_PARALLEL: 4,
 
-    const candles = timestamps.map((t,i)=>({
-      time: t,
-      open: quotes.open[i],
-      high: quotes.high[i],
-      low: quotes.low[i],
-      close: quotes.close[i]
-    })).filter(c=>c.high && c.low)
+  VOLUME_CAP: 5,
 
-    return candles
+  MOMENTUM_THRESHOLD: 1,
 
-  }catch(e){
-    console.log("Candle fetch error:",symbol)
-    return []
+  SHORT_THRESHOLD: -0.3,
+
+  API_TIMEOUT: 10000
+};
+
+// =============================================
+// AXIOS INSTANCE
+// =============================================
+
+const api = axios.create({
+
+  timeout: CONFIG.API_TIMEOUT,
+
+  headers: {
+
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+
+    "Accept":
+      "application/json,text/plain,*/*",
+
+    "Accept-Language":
+      "en-US,en;q=0.9",
+
+    "Connection":
+      "keep-alive"
   }
+});
 
+// =============================================
+// MARKET TIME
+// =============================================
+
+function isMarketOpenIST() {
+
+  const now = new Date(
+    new Date().toLocaleString(
+      "en-US",
+      { timeZone: "Asia/Kolkata" }
+    )
+  );
+
+  const mins =
+    now.getHours() * 60 +
+    now.getMinutes();
+
+  return (
+    mins >= (9 * 60 + 15) &&
+    mins <= (15 * 60 + 30)
+  );
 }
 
-// ===============================
+// =============================================
+// SLEEP
+// =============================================
+
+function sleep(ms) {
+
+  return new Promise(resolve =>
+    setTimeout(resolve, ms)
+  );
+}
+
+// =============================================
+// FETCH 5M CANDLES
+// =============================================
+
+async function get5MinCandles(
+  symbol,
+  retry = 2
+) {
+
+  try {
+
+    const url =
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=1d`;
+
+    const res = await api.get(url);
+
+    const result =
+      res?.data?.chart?.result?.[0];
+
+    if (!result) {
+
+      console.log(
+        "No chart result:",
+        symbol
+      );
+
+      return [];
+    }
+
+    const timestamps =
+      result.timestamp || [];
+
+    const quotes =
+      result.indicators?.quote?.[0];
+
+    if (!quotes) {
+
+      console.log(
+        "No quote candles:",
+        symbol
+      );
+
+      return [];
+    }
+
+    const candles = timestamps.map(
+      (t, i) => ({
+
+        time: t,
+
+        open: quotes.open?.[i],
+
+        high: quotes.high?.[i],
+
+        low: quotes.low?.[i],
+
+        close: quotes.close?.[i],
+
+        volume: quotes.volume?.[i] || 0
+      })
+    )
+    .filter(c =>
+
+      c.open != null &&
+      c.high != null &&
+      c.low != null &&
+      c.close != null
+    );
+
+    return candles;
+
+  } catch (e) {
+
+    if (retry > 0) {
+
+      await sleep(10000);
+
+      return get5MinCandles(
+        symbol,
+        retry - 1
+      );
+    }
+
+    console.log(
+      "Candle fetch error:",
+      symbol,
+      e
+    );
+
+    return [];
+  }
+}
+
+// =============================================
+// REAL VWAP
+// =============================================
+
+function calculateVWAP(candles) {
+
+  let cumulativePV = 0;
+  let cumulativeVol = 0;
+
+  for (const c of candles) {
+
+    const typicalPrice =
+      (c.high + c.low + c.close) / 3;
+
+    cumulativePV +=
+      typicalPrice * c.volume;
+
+    cumulativeVol += c.volume;
+  }
+
+  if (!cumulativeVol) {
+
+    return null;
+  }
+
+  return cumulativePV / cumulativeVol;
+}
+
+// =============================================
+// RELATIVE STRENGTH
+// =============================================
+
+function calculateStrength(
+  momentum,
+  moveFromOpen,
+  volRatio
+) {
+
+  const cappedVolume =
+    Math.min(
+      volRatio,
+      CONFIG.VOLUME_CAP
+    );
+
+  return (
+
+    momentum * 30 +
+
+    moveFromOpen * 35 +
+
+    cappedVolume * 35
+  );
+}
+
+// =============================================
 // ANALYZE STOCK
-// ===============================
-async function analyzeStock(q){
+// =============================================
 
-  const price=q.regularMarketPrice||0
-  const prev=q.regularMarketPreviousClose||0
-  const open=q.regularMarketOpen||0
+async function analyzeStock(q) {
 
-  const volume=q.regularMarketVolume||0
-  const avgVolume=q.averageDailyVolume3Month||1
+  try {
 
-  if(price<30||price>5000) return null
+    const price =
+      q.regularMarketPrice || 0;
 
-  const momentum=((price-prev)/prev)*100
-  const gap=((open-prev)/prev)*100
-  const vol_ratio=volume/avgVolume
-  const moveFromOpen=((price-open)/open)*100
+    const prevClose =
+      q.regularMarketPreviousClose || 0;
 
-  const dayHigh = q.regularMarketDayHigh || price
-  const dayLow = q.regularMarketDayLow || price
+    const open =
+      q.regularMarketOpen || 0;
 
-  const distanceFromHigh = ((dayHigh - price) / dayHigh) * 100
+    const volume =
+      q.regularMarketVolume || 0;
 
-  const vwap = (dayHigh + dayLow + price) / 3
-  const belowVWAP = price < vwap
+    const avgVolume =
+      q.averageDailyVolume3Month || 1;
 
-  // 🔴 GET CANDLES
-  const candles = await get5MinCandles(q.symbol)
+    // =========================================
+    // BASIC FILTER
+    // =========================================
 
-  let prevHigh=null
-  let prevLow=null
+    if (
+      price < CONFIG.MIN_PRICE ||
+      price > CONFIG.MAX_PRICE
+    ) {
 
-  if(candles.length >= 2){
-    const prevCandle = candles[candles.length - 2]
-    prevHigh = prevCandle.high
-    prevLow = prevCandle.low
-  }
+      return null;
+    }
 
-  const score =
-      momentum*25+
-      moveFromOpen*35+
-      vol_ratio*40
+    // =========================================
+    // CALCULATIONS
+    // =========================================
 
-  const shortScore =
-      (-momentum)*30 +
-      (-moveFromOpen)*40 +
-      vol_ratio*30
+    const momentum =
+      ((price - prevClose) /
+      prevClose) * 100;
 
-  return{
-    symbol:q.symbol,
-    price,
-    momentum,
-    gap,
-    vol_ratio,
-    moveFromOpen,
-    vwap,
-    belowVWAP,
-    score,
-    shortScore,
-    distanceFromHigh,
-    prevHigh,
-    prevLow
+    const gap =
+      ((open - prevClose) /
+      prevClose) * 100;
+
+    const moveFromOpen =
+      ((price - open) /
+      open) * 100;
+
+    const volRatio =
+      volume / avgVolume;
+
+    const dayHigh =
+      q.regularMarketDayHigh || price;
+
+    const dayLow =
+      q.regularMarketDayLow || price;
+
+    const distanceFromHigh =
+      ((dayHigh - price) /
+      dayHigh) * 100;
+
+    // =========================================
+    // EARLY REJECTION
+    // =========================================
+
+    const possibleLong =
+      momentum > 0.5 &&
+      volRatio > 0.8;
+
+    const possibleShort =
+      momentum < -0.2 &&
+      volRatio > 0.8;
+
+    if (
+      !possibleLong &&
+      !possibleShort
+    ) {
+
+      return null;
+    }
+
+    // =========================================
+    // FETCH CANDLES
+    // =========================================
+
+    let candles = [];
+
+    if (isMarketOpenIST()) {
+
+      candles =
+        await get5MinCandles(
+          q.symbol
+        );
+
+      await sleep(
+        CONFIG.REQUEST_DELAY
+      );
+    }
+
+    // =========================================
+    // FALLBACK
+    // =========================================
+
+    if (!candles.length) {
+
+      return {
+
+        symbol: q.symbol,
+
+        price,
+
+        momentum,
+
+        gap,
+
+        moveFromOpen,
+
+        volRatio,
+
+        distanceFromHigh,
+
+        vwap: null,
+
+        belowVWAP: false,
+
+        breakout: false,
+
+        breakdown: false,
+
+        score:
+          calculateStrength(
+            momentum,
+            moveFromOpen,
+            volRatio
+          )
+      };
+    }
+
+    // =========================================
+    // PREVIOUS CANDLE
+    // =========================================
+
+    const prevCandle =
+      candles[candles.length - 2];
+
+    const latestCandle =
+      candles[candles.length - 1];
+
+    const prevHigh =
+      prevCandle?.high || dayHigh;
+
+    const prevLow =
+      prevCandle?.low || dayLow;
+
+    // =========================================
+    // REAL VWAP
+    // =========================================
+
+    const vwap =
+      calculateVWAP(candles);
+
+    const belowVWAP =
+      vwap ? price < vwap : false;
+
+    // =========================================
+    // BREAKOUT / BREAKDOWN
+    // =========================================
+
+    const breakout =
+      latestCandle.close >
+      prevHigh;
+
+    const breakdown =
+      latestCandle.close <
+      prevLow;
+
+    // =========================================
+    // SCORING
+    // =========================================
+
+    const score =
+      calculateStrength(
+        momentum,
+        moveFromOpen,
+        volRatio
+      );
+
+    return {
+
+      symbol: q.symbol,
+
+      price,
+
+      momentum,
+
+      gap,
+
+      moveFromOpen,
+
+      volRatio,
+
+      distanceFromHigh,
+
+      vwap,
+
+      belowVWAP,
+
+      breakout,
+
+      breakdown,
+
+      prevHigh,
+
+      prevLow,
+
+      score
+    };
+
+  } catch (e) {
+
+    console.log(
+      "Analyze error:",
+      q.symbol,
+      e.message
+    );
+
+    return null;
   }
 }
 
-// ===============================
+// =============================================
+// CLASSIFY LONGS
+// =============================================
+
+function isStrongLong(s) {
+
+  const strongMomentum =
+    s.momentum > 1;
+
+  const strongVolume =
+    s.volRatio > 1.2;
+
+  const controlledMove =
+    s.moveFromOpen > 0.5 &&
+    s.moveFromOpen < 3.5;
+
+  const pullback =
+    s.distanceFromHigh > 0.3;
+
+  const aboveVWAP =
+    !s.belowVWAP;
+
+  return (
+
+    strongMomentum &&
+    strongVolume &&
+    controlledMove &&
+    pullback &&
+    aboveVWAP
+  );
+}
+
+// =============================================
+// CLASSIFY SHORTS
+// =============================================
+
+function getShortTag(s) {
+
+  // =========================================
+  // FAILED GAP
+  // =========================================
+
+  if (
+
+    s.gap > 1 &&
+    s.moveFromOpen < -0.5 &&
+    s.volRatio > 1.2
+  ) {
+
+    return "FAILED_GAP";
+  }
+
+  // =========================================
+  // VWAP BREAK
+  // =========================================
+
+  if (
+
+    s.belowVWAP &&
+    s.momentum < -0.5 &&
+    s.breakdown
+  ) {
+
+    return "VWAP_BREAKDOWN";
+  }
+
+  // =========================================
+  // WEAK TREND
+  // =========================================
+
+  if (
+
+    s.momentum < -0.5 &&
+    s.moveFromOpen < -0.3 &&
+    s.volRatio > 1
+  ) {
+
+    return "WEAK_TREND";
+  }
+
+  return null;
+}
+
+// =============================================
 // MAIN ENGINE
-// ===============================
-export async function runScannerEngine(quotes){
+// =============================================
 
-  const analyzed = await Promise.all(
-    quotes.map(q=>analyzeStock(q))
-  )
+export async function runScannerEngine(
+  quotes
+) {
 
-  const stocks = analyzed.filter(Boolean)
+  console.log(
+    "================================="
+  );
 
-  const result={
-    top:[],
-    shortCandidates:[]
+  console.log(
+    "SCANNER STARTED"
+  );
+
+  console.log(
+    "================================="
+  );
+
+  const analyzed = [];
+
+  // =========================================
+  // CONTROLLED PROCESSING
+  // =========================================
+
+  for (const q of quotes) {
+
+    const stock =
+      await analyzeStock(q);
+
+    if (stock) {
+
+      analyzed.push(stock);
+    }
   }
 
-  for(const s of stocks){
+  // =========================================
+  // RESULT OBJECT
+  // =========================================
 
-    if(!s) continue
+  const result = {
 
-    // 🟢 BUY FILTER
-    if(
-      s.momentum > 1 &&
-      s.vol_ratio > 1.2 &&
-      s.moveFromOpen > 0.6 &&
-      s.moveFromOpen < 2.2 &&
-      s.distanceFromHigh > 0.4
-    ){
-      result.top.push(s)
+    top: [],
+
+    shortCandidates: []
+  };
+
+  // =========================================
+  // CLASSIFICATION
+  // =========================================
+
+  for (const s of analyzed) {
+
+    // =========================================
+    // LONGS
+    // =========================================
+
+    if (isStrongLong(s)) {
+
+      result.top.push({
+
+        ...s,
+
+        setup:
+          "MOMENTUM_PULLBACK"
+      });
     }
 
-    // 🔴 SHORT FILTER (loose)
-    if(
-      s.momentum < -0.3 &&
-      s.moveFromOpen < -0.2 &&
-      s.vol_ratio > 1.1
-    ){
-      result.shortCandidates.push(s)
-    }
+    // =========================================
+    // SHORTS
+    // =========================================
 
+    const shortTag =
+      getShortTag(s);
+
+    if (shortTag) {
+
+      result.shortCandidates.push({
+
+        ...s,
+
+        tag: shortTag
+      });
+    }
   }
 
-  result.top.sort((a,b)=>b.score-a.score)
-  result.shortCandidates.sort((a,b)=>b.shortScore-a.shortScore)
+  // =========================================
+  // SORTING
+  // =========================================
 
-  return result
+  result.top.sort(
+    (a, b) => b.score - a.score
+  );
+
+  result.shortCandidates.sort(
+    (a, b) =>
+      a.score - b.score
+  );
+
+  // =========================================
+  // REMOVE DUPLICATES
+  // =========================================
+
+  result.shortCandidates =
+    result.shortCandidates.filter(
+      (v, i, arr) =>
+
+        i ===
+        arr.findIndex(
+          t => t.symbol === v.symbol
+        )
+    );
+
+  // =========================================
+  // LIMITS
+  // =========================================
+
+  result.top =
+    result.top.slice(0, 10);
+
+  result.shortCandidates =
+    result.shortCandidates.slice(
+      0,
+      10
+    );
+
+  // =========================================
+  // FINAL LOGS
+  // =========================================
+
+  console.log(
+    "LONG CANDIDATES:",
+    result.top.length
+  );
+
+  console.log(
+    "SHORT CANDIDATES:",
+    result.shortCandidates.length
+  );
+
+  console.log(
+    "================================="
+  );
+
+  return result;
 }

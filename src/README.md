@@ -1,0 +1,1 @@
+npx javascript-obfuscator engine.js --output engine.obf.js
