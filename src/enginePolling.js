@@ -459,5 +459,23 @@ export async function runScannerEnginePolling(quotes) {
   result.marketMovers =
     result.marketMovers.slice(0, 10);
 
+      
+  console.log(
+    "==================POLLING START==============="
+  );
+  console.log(
+    "BUY CANDIDATES POLLING:",
+   results.top.map(s => s.symbol)
+  );
+
+  console.log(
+    "SHORT CANDIDATES POLLING:",
+      results.shortCandidates.map(s => s.symbol)
+  );
+
+  console.log(
+    "==================POLLING END==============="
+  );
+
   return result;
 }

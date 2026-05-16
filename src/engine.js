@@ -678,19 +678,22 @@ export async function runScannerEngine(
   // =========================================
   // FINAL LOGS
   // =========================================
-
+  
   console.log(
-    "LONG CANDIDATES:",
-    result.top.length
+    "==================ENGINE START==============="
+  );
+  console.log(
+    "BUY CANDIDATES ENGINE:",
+   results.top.map(s => s.symbol)
   );
 
   console.log(
-    "SHORT CANDIDATES:",
-    result.shortCandidates.length
+    "SHORT CANDIDATES ENGINE:",
+      results.shortCandidates.map(s => s.symbol)
   );
 
   console.log(
-    "================================="
+    "==================ENGINE END==============="
   );
 
   return result;

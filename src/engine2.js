@@ -145,6 +145,19 @@ function classifyStocks(stocks){
   result.top.sort((a,b)=>b.score-a.score)
   result.shortCandidates.sort((a,b)=>b.shortScore-a.shortScore)
 
+  console.log(
+    "BUY CANDIDATES POLLING:",
+    result.top
+  );
+
+  console.log(
+    "SHORT CANDIDATES POLLING:",
+    result.shortCandidates
+  );
+
+  console.log(
+    "================================="
+  );
   return result
 }
 
